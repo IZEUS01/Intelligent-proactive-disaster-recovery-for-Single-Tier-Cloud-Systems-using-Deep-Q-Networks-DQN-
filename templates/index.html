@@ -1,0 +1,427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>IPDR-Cloud Simulation Dashboard</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
+    <style>
+        body {
+            background-color: #0a0a0a;
+            color: #d4d4d4;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            margin: 0;
+            padding: 20px;
+        }
+
+        .mono { font-family: "Courier New", Courier, monospace; font-weight: 600; }
+        .panel { background-color: #141414; border: 1px solid #333; padding: 15px; border-radius: 4px; }
+        .panel-title { color: #888; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 10px; border-bottom: 1px solid #333; padding-bottom: 5px;}
+        
+        .val-bar-container { width: 100%; height: 6px; background-color: #222; margin-top: 4px; border-radius: 2px; overflow: hidden; position: relative;}
+        .val-bar { height: 100%; width: 0%; transition: width 0.5s ease-in-out; }
+        
+        .bar-green { background-color: #22c55e; }
+        .bar-amber { background-color: #f59e0b; }
+        .bar-red { background-color: #ef4444; }
+
+        .text-green { color: #22c55e; }
+        .text-amber { color: #f59e0b; }
+        .text-red { color: #ef4444; }
+
+        .flash-red { animation: flash-bg-red 2s; }
+        @keyframes flash-bg-red { 0% { background-color: rgba(239, 68, 68, 0.4); } 100% { background-color: #141414; } }
+        
+        .flash-green-bar { animation: flash-bg-green 1s; }
+        @keyframes flash-bg-green { 0% { background-color: #22c55e; width: 100%; } 100% { } }
+
+        .prediction-bar { height: 8px; border-radius: 3px; transition: width 0.5s, background-color 0.5s; }
+        .chart-label { font-size: 9px; color: #555; text-transform: uppercase; letter-spacing: 1px; text-align: center; margin-top: 2px; }
+
+        table { width: 100%; font-size: 0.8rem; border-collapse: collapse; }
+        th, td { text-align: left; padding: 4px; border-bottom: 1px solid #222; }
+        th { color: #666; }
+
+        .q-bar-container { display: flex; align-items: flex-end; height: 40px; gap: 4px; margin-top: 5px; border-bottom: 1px solid #333; }
+        .q-bar { width: 30px; background-color: #3b82f6; transition: height 0.2s; }
+        .q-label { font-size: 10px; color: #666; text-align: center; margin-top: 2px;}
+        
+        .chart-container { height: 250px; position: relative; margin-bottom: 15px; }
+
+        button { background: #222; border: 1px solid #444; color: #ddd; padding: 5px 10px; font-family: monospace; cursor: pointer; border-radius: 2px;}
+        button:hover { background: #333; }
+    </style>
+</head>
+<body class="h-screen flex flex-col">
+
+    <div class="grid grid-cols-12 gap-4 h-full">
+        
+        <!-- Left: Telemetry Panel -->
+        <div id="telemetry-panel" class="col-span-3 panel flex flex-col gap-4">
+            <div class="panel-title">Live Telemetry</div>
+            <div id="features-container" class="flex flex-col gap-3">
+                <!-- Injected via JS -->
+            </div>
+            
+            <!-- Failure Prediction -->
+            <div class="mt-4 border-t border-[#333] pt-4">
+                <div class="panel-title">⚡ Failure Prediction</div>
+                <div class="text-[10px] text-[#888] flex justify-between mb-1">
+                    <span>Predicted Risk</span>
+                    <span id="pred-pct" class="mono text-white">0%</span>
+                </div>
+                <div class="val-bar-container" style="height:8px">
+                    <div id="pred-bar" class="prediction-bar bar-green" style="width:0%"></div>
+                </div>
+                <div id="pred-label" class="text-[10px] mt-1 text-[#666]">LOW RISK — No action needed</div>
+            </div>
+
+            <!-- Backup Schedule -->
+            <div class="mt-4 border-t border-[#333] pt-3">
+                <div class="panel-title">📅 Backup Scheduler</div>
+                <div class="text-[10px] text-[#777] flex justify-between"><span>Next backup in</span><span id="next-backup" class="mono text-white">—</span></div>
+                <div class="text-[10px] text-[#777] flex justify-between mt-1"><span>Schedule mode</span><span id="sched-mode" class="mono text-white">—</span></div>
+                <div class="text-[10px] text-[#777] flex justify-between mt-1"><span>SLA compliance</span><span id="sla-pct" class="mono text-green">—</span></div>
+            </div>
+
+            <div class="mt-auto border-t border-[#333] pt-4">
+                <div class="panel-title">Controls</div>
+                <div class="grid grid-cols-2 gap-2 mt-2">
+                    <button onclick="sendCommand('force_failure')" style="color:#ef4444;border-color:#7f1d1d;background:rgba(127,29,29,0.2)">FORCE FAILURE</button>
+                    <button onclick="sendCommand('traffic_spike')" style="color:#f59e0b;border-color:#78350f;background:rgba(120,53,15,0.2)">TRAFFIC SPIKE</button>
+                    <button onclick="sendCommand('reduce_traffic')" style="color:#22c55e;border-color:#14532d;background:rgba(20,83,45,0.2)">REDUCE TRAFFIC</button>
+                    <button onclick="sendCommand('pause')">PAUSE</button>
+                    <button onclick="sendCommand('play')">PLAY</button>
+                    <button onclick="sendCommand('reset')" class="col-span-2" style="border-color:#555">⟳ RESET SIMULATION</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Center: Charts -->
+        <div class="col-span-6 panel flex flex-col">
+            <div class="panel-title">DQN Agent — Non-Stationary Workload Trace
+                <span style="font-size:9px;color:#555;margin-left:8px">│ <span style="color:#3b82f6">━</span> CPU %  <span style="color:#a855f7">━</span> MEM %  <span style="color:rgba(239,68,68,0.7)">┊</span> Failure  <span style="color:#22c55e">▲</span> Backup</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="nonstatChart"></canvas>
+            </div>
+            <div class="chart-label">← last 100 simulation steps →</div>
+
+            <div class="panel-title mt-3">Stationary Baseline — Reference Trace
+                <span style="font-size:9px;color:#555;margin-left:8px">│ stable random-walk, no workload drift</span>
+            </div>
+            <div class="chart-container">
+                <canvas id="statChart"></canvas>
+            </div>
+            <div class="chart-label">← last 100 steps (dashed = no DQN intervention) →</div>
+        </div>
+
+        <!-- Right: Agent Panel -->
+        <div class="col-span-3 flex flex-col gap-4">
+            <div class="panel flex-shrink-0">
+                <div class="panel-title">DQN Decision Panel</div>
+                <div class="mb-4">
+                    <div class="text-[10px] text-[#888] uppercase">Current Action</div>
+                    <div id="agent-action" class="text-2xl mono mt-1">--</div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-x-4 gap-y-2 mb-4">
+                    <div>
+                        <div class="text-[10px] text-[#888] uppercase">Step Reward</div>
+                        <div id="agent-reward" class="mono text-lg text-white">0.00</div>
+                    </div>
+                    <div>
+                        <div class="text-[10px] text-[#888] uppercase">Cumulative</div>
+                        <div id="agent-cumulative" class="mono text-lg text-white">0.00</div>
+                    </div>
+                    <div>
+                        <div class="text-[10px] text-[#888] uppercase">Current RTO</div>
+                        <div id="agent-rto" class="mono text-lg text-white">0.0</div>
+                    </div>
+                    <div>
+                        <div class="text-[10px] text-[#888] uppercase">Current RPO</div>
+                        <div id="agent-rpo" class="mono text-lg text-white">0.0</div>
+                    </div>
+                    <div class="col-span-2 mt-2 pt-2 border-t border-[#333]">
+                        <div class="text-[10px] text-[#888] uppercase flex justify-between">
+                            <span>SLA Breaches</span>
+                            <span id="agent-breaches" class="text-red mono text-base">0</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="text-[10px] text-[#888] uppercase">Q-Values <span style="color:#444;font-size:9px">(higher = agent prefers this action)</span></div>
+                <div class="flex gap-4">
+                    <div class="flex flex-col items-center">
+                        <div class="q-bar-container"><div id="q0-bar" class="q-bar"></div></div>
+                        <div class="q-label" style="color:#22c55e">NORMAL</div>
+                    </div>
+                    <div class="flex flex-col items-center">
+                        <div class="q-bar-container"><div id="q1-bar" class="q-bar"></div></div>
+                        <div class="q-label" style="color:#f59e0b">WARN</div>
+                    </div>
+                    <div class="flex flex-col items-center">
+                        <div class="q-bar-container"><div id="q2-bar" class="q-bar"></div></div>
+                        <div class="q-label" style="color:#ef4444">CRIT</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel flex-grow overflow-hidden flex flex-col">
+                <div class="panel-title">Backup Log</div>
+                <div class="overflow-y-auto flex-grow">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Step</th>
+                                <th>Severity</th>
+                                <th>RPO Trigger</th>
+                            </tr>
+                        </thead>
+                        <tbody id="backup-log-table" class="mono">
+                            <!-- Injected -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Features definition with thresholds
+        const featuresConfig = [
+            { id: 'cpu_util', label: 'cpu_util (%)', max: 100, warn: 70, crit: 90 },
+            { id: 'mem_util', label: 'mem_util (%)', max: 100, warn: 75, crit: 90 },
+            { id: 'disk_io', label: 'disk_io (MB/s)', max: 500, warn: 300, crit: 450 },
+            { id: 'net_latency', label: 'net_latency (ms)', max: 2000, warn: 500, crit: 1000 },
+            { id: 'error_rate', label: 'error_rate (%)', max: 100, warn: 5, crit: 20 },
+            { id: 'backup_age', label: 'backup_age (min)', max: 60, warn: 15, crit: 30, special: 'backup' },
+            { id: 'sla_breach_risk', label: 'sla_breach_risk', max: 1.0, warn: 0.5, crit: 0.8 },
+            { id: 'workload_trend', label: 'workload_trend', max: 1.0, min: -1.0, warn: 0.8, crit: 0.95 }
+        ];
+
+        // Initialize features UI
+        const featuresContainer = document.getElementById('features-container');
+        featuresConfig.forEach(f => {
+            featuresContainer.innerHTML += `
+                <div>
+                    <div class="flex justify-between text-[11px] text-[#aaa]">
+                        <span>${f.label}</span>
+                        <span id="val-${f.id}" class="mono text-[#eee]">0</span>
+                    </div>
+                    <div class="val-bar-container">
+                        <div id="bar-${f.id}" class="val-bar bar-green"></div>
+                    </div>
+                </div>
+            `;
+        });
+
+        // Chart setup
+        const commonChartOptions = {
+            responsive: true,
+            maintainAspectRatio: false,
+            animation: false,
+            scales: {
+                x: { display: false },
+                y: { min: 0, max: 100, grid: { color: '#222' }, ticks: { color: '#666', font: {family: 'monospace'} } }
+            },
+            plugins: {
+                legend: { position: 'top', align: 'end', labels: { color: '#aaa', boxWidth: 10, font: {size: 10} } }
+            }
+        };
+
+        const ctxNonStat = document.getElementById('nonstatChart').getContext('2d');
+        const nonStatChart = new Chart(ctxNonStat, {
+            type: 'line',
+            data: {
+                labels: Array(100).fill(''),
+                datasets: [
+                    { label: 'CPU', borderColor: '#3b82f6', borderWidth: 1.5, data: [], pointRadius: 0, tension: 0.1 },
+                    { label: 'MEM', borderColor: '#a855f7', borderWidth: 1.5, data: [], pointRadius: 0, tension: 0.1 }
+                ]
+            },
+            options: {
+                ...commonChartOptions,
+                plugins: {
+                    ...commonChartOptions.plugins,
+                    annotation: { annotations: {} }
+                }
+            }
+        });
+
+        const ctxStat = document.getElementById('statChart').getContext('2d');
+        const statChart = new Chart(ctxStat, {
+            type: 'line',
+            data: {
+                labels: Array(100).fill(''),
+                datasets: [
+                    { label: 'CPU', borderColor: '#3b82f6', borderWidth: 1.5, data: [], pointRadius: 0, tension: 0.1, borderDash: [5, 5] },
+                    { label: 'MEM', borderColor: '#a855f7', borderWidth: 1.5, data: [], pointRadius: 0, tension: 0.1, borderDash: [5, 5] }
+                ]
+            },
+            options: commonChartOptions
+        });
+
+        const actionMap = [
+            { text: 'NORMAL', class: 'text-green' },
+            { text: 'WARNING', class: 'text-amber' },
+            { text: 'CRITICAL', class: 'text-red' }
+        ];
+
+        async function fetchState() {
+            try {
+                const res = await fetch('/api/state');
+                const data = await res.json();
+                
+                // Telemetry Updates
+                featuresConfig.forEach(f => {
+                    const val = data.features[f.id];
+                    let displayVal = val;
+                    if(f.id !== 'workload_trend' && f.id !== 'sla_breach_risk') displayVal = val.toFixed(1);
+                    else displayVal = val.toFixed(3);
+                    
+                    document.getElementById(`val-${f.id}`).innerText = displayVal;
+                    
+                    const barEl = document.getElementById(`bar-${f.id}`);
+                    let pct = 0;
+                    if (f.min !== undefined) {
+                        pct = ((val - f.min) / (f.max - f.min)) * 100;
+                    } else {
+                        pct = (val / f.max) * 100;
+                    }
+                    barEl.style.width = Math.min(Math.max(pct, 0), 100) + '%';
+
+                    // Color logic
+                    barEl.className = 'val-bar ';
+                    if (val >= f.crit) barEl.classList.add('bar-red');
+                    else if (val >= f.warn) barEl.classList.add('bar-amber');
+                    else barEl.classList.add('bar-green');
+                    
+                    if (f.special === 'backup' && data.backup_triggered) {
+                        barEl.classList.add('flash-green-bar');
+                        setTimeout(() => barEl.classList.remove('flash-green-bar'), 1000);
+                    }
+                });
+
+                if (data.is_failure) {
+                    const panel = document.getElementById('telemetry-panel');
+                    panel.classList.add('flash-red');
+                    setTimeout(() => panel.classList.remove('flash-red'), 2000);
+                }
+
+                // Chart Updates
+                const cpuTrace = data.nonstationary_trace.map(t => t.cpu);
+                const memTrace = data.nonstationary_trace.map(t => t.mem);
+                nonStatChart.data.datasets[0].data = cpuTrace;
+                nonStatChart.data.datasets[1].data = memTrace;
+
+                // Annotations for Non-Stationary Chart
+                let annotations = {};
+                data.nonstationary_trace.forEach((t, i) => {
+                    if (t.failure) {
+                        annotations[`failure_${i}`] = {
+                            type: 'line', xMin: i, xMax: i, borderColor: 'rgba(239, 68, 68, 0.5)', borderWidth: 1, borderDash: [2, 2]
+                        };
+                    }
+                    if (t.backup) {
+                        annotations[`backup_${i}`] = {
+                            type: 'point', xValue: i, yValue: 5, backgroundColor: '#22c55e', radius: 4, pointStyle: 'triangle'
+                        };
+                    }
+                });
+                nonStatChart.options.plugins.annotation.annotations = annotations;
+                nonStatChart.update();
+
+                const statCpuTrace = data.stationary_trace.map(t => t.cpu);
+                const statMemTrace = data.stationary_trace.map(t => t.mem);
+                statChart.data.datasets[0].data = statCpuTrace;
+                statChart.data.datasets[1].data = statMemTrace;
+                statChart.update();
+
+                // Agent Panel Updates
+                const a = actionMap[data.action];
+                const actionEl = document.getElementById('agent-action');
+                actionEl.innerText = a.text;
+                actionEl.className = `text-2xl mono mt-1 ${a.class}`;
+
+                document.getElementById('agent-reward').innerText = data.reward.toFixed(2);
+                document.getElementById('agent-cumulative').innerText = data.cumulative_reward.toFixed(2);
+                document.getElementById('agent-rto').innerText = data.rto.toFixed(2) + ' min';
+                document.getElementById('agent-rpo').innerText = data.rpo.toFixed(2) + ' min';
+                document.getElementById('agent-breaches').innerText = data.sla_breaches;
+
+                // ── Failure Prediction ───────────────────────────────────────
+                const risk = data.features.sla_breach_risk;  // 0–1
+                const riskPct = Math.round(risk * 100);
+                document.getElementById('pred-pct').innerText = riskPct + '%';
+                const predBar = document.getElementById('pred-bar');
+                predBar.style.width = riskPct + '%';
+                predBar.className = 'prediction-bar ' + (risk >= 0.8 ? 'bar-red' : risk >= 0.5 ? 'bar-amber' : 'bar-green');
+                const predLabel = document.getElementById('pred-label');
+                if (risk >= 0.8) predLabel.innerText = '🔴 HIGH RISK — Backup recommended now';
+                else if (risk >= 0.5) predLabel.innerText = '🟡 MODERATE RISK — Monitor closely';
+                else predLabel.innerText = '🟢 LOW RISK — No action needed';
+                predLabel.style.color = risk >= 0.8 ? '#ef4444' : risk >= 0.5 ? '#f59e0b' : '#22c55e';
+
+                // ── Backup Scheduler Panel ───────────────────────────────────
+                const action = data.action;
+                const intervals = [30, 10, 2];
+                const modeNames = ['NORMAL (30 min)', 'WARNING (10 min)', 'CRITICAL (2 min)'];
+                const modeColors = ['#22c55e', '#f59e0b', '#ef4444'];
+                const timeLeft = Math.max(0, intervals[action] - data.features.backup_age);
+                document.getElementById('next-backup').innerText = timeLeft.toFixed(0) + ' steps';
+                const schedEl = document.getElementById('sched-mode');
+                schedEl.innerText = modeNames[action];
+                schedEl.style.color = modeColors[action];
+                // SLA compliance estimate from cumulative data
+                const slaEl = document.getElementById('sla-pct');
+                const slaPct = Math.max(0, 100 - (data.sla_breaches * 5)).toFixed(0);
+                slaEl.innerText = slaPct + '%';
+                slaEl.style.color = slaPct >= 90 ? '#22c55e' : slaPct >= 70 ? '#f59e0b' : '#ef4444';
+
+                // Q-Values (normalize to 0-100% for bar height visually)
+                const qvals = data.q_values;
+                const maxQ = Math.max(...qvals, 1);
+                const minQ = Math.min(...qvals, 0);
+                const range = maxQ - minQ;
+                
+                for(let i=0; i<3; i++) {
+                    const el = document.getElementById(`q${i}-bar`);
+                    let h = 0;
+                    if(range > 0) h = ((qvals[i] - minQ) / range) * 100;
+                    else h = qvals[i] > 0 ? 100 : 0;
+                    
+                    el.style.height = h + '%';
+                    el.style.backgroundColor = (i === data.action) ? '#3b82f6' : '#444';
+                    el.title = qvals[i].toFixed(4);
+                }
+
+                // Backup Log
+                const tbody = document.getElementById('backup-log-table');
+                tbody.innerHTML = data.backup_log.reverse().map(l => {
+                    let color = l.severity === 'CRITICAL' ? 'text-red' : l.severity === 'WARNING' ? 'text-amber' : 'text-green';
+                    return `<tr>
+                        <td>${l.timestamp}</td>
+                        <td class="${color}">${l.severity}</td>
+                        <td>${l.rpo.toFixed(1)}m</td>
+                    </tr>`;
+                }).join('');
+
+            } catch(e) { console.error("Poll Error:", e); }
+        }
+
+        async function sendCommand(action) {
+            fetch('/api/control', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({action})
+            });
+        }
+
+        setInterval(fetchState, 1000);
+        fetchState();
+    </script>
+</body>
+</html>

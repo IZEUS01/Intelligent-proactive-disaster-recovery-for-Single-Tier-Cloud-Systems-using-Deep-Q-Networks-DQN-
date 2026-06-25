@@ -1,0 +1,6 @@
+Flask
+torch
+numpy
+pandas
+gymnasium
+matplotlib
